@@ -1,0 +1,4 @@
+index,video,prompt
+0,C:\path\to\video1.mp4,"describe the sounds you want"
+1,C:\path\to\video2.mp4,"another sound description"
+2,C:\path\to\video3.mp4,"leave empty string for auto-detect"

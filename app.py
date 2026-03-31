@@ -20,7 +20,7 @@ from loguru import logger
 
 # ── Config ──────────────────────────────────────────────────────────────────
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_DIR = os.path.join(APP_DIR, "repo")
+REPO_DIR = os.path.join(APP_DIR, "repo") if os.path.isdir(os.path.join(APP_DIR, "repo")) else APP_DIR
 MODEL_PATH = os.path.join(APP_DIR, "pretrained_models")
 OUTPUT_DIR = os.path.join(APP_DIR, "output")
 UPLOAD_DIR = os.path.join(APP_DIR, "uploads")
@@ -46,6 +46,9 @@ model_state = {
 }
 
 jobs = {}
+job_queue = []  # ordered list of job_ids
+queue_lock = threading.Lock()
+queue_running = False
 
 
 def set_seed(seed=1):
@@ -133,6 +136,38 @@ def run_inference(job_id, video_path, prompt, neg_prompt, guidance_scale, num_st
         logger.error(f"Job {job_id} failed: {e}")
 
 
+def process_queue():
+    """Process jobs sequentially, one at a time."""
+    global queue_running
+    while True:
+        job_id = None
+        with queue_lock:
+            # Find next queued (not cancelled) job
+            for jid in job_queue:
+                if jobs[jid]["status"] == "queued":
+                    job_id = jid
+                    break
+            if not job_id:
+                queue_running = False
+                return
+
+        j = jobs[job_id]
+        run_inference(
+            job_id, j["_video_path"], j["_prompt"], j["_neg_prompt"],
+            j["_guidance_scale"], j["_num_steps"]
+        )
+
+
+def enqueue_job(job_id):
+    """Add job to queue and start processor if not running."""
+    global queue_running
+    with queue_lock:
+        job_queue.append(job_id)
+        if not queue_running:
+            queue_running = True
+            threading.Thread(target=process_queue, daemon=True).start()
+
+
 # ── Routes ──────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
@@ -183,18 +218,17 @@ def api_generate():
     jobs[job_id] = {
         "status": "queued", "progress": 0, "message": "Queued...",
         "output_video": None, "output_audio": None,
+        "filename": secure_filename(video.filename) or "upload.mp4",
+        "prompt_text": request.form.get("prompt", ""),
+        # internal params (not sent to frontend)
+        "_video_path": video_path,
+        "_prompt": request.form.get("prompt", ""),
+        "_neg_prompt": request.form.get("neg_prompt", ""),
+        "_guidance_scale": float(request.form.get("guidance_scale", 4.5)),
+        "_num_steps": int(request.form.get("num_steps", 50)),
     }
 
-    threading.Thread(
-        target=run_inference,
-        args=(job_id, video_path,
-              request.form.get("prompt", ""),
-              request.form.get("neg_prompt", ""),
-              float(request.form.get("guidance_scale", 4.5)),
-              int(request.form.get("num_steps", 50))),
-        daemon=True
-    ).start()
-
+    enqueue_job(job_id)
     return jsonify({"job_id": job_id})
 
 
@@ -216,6 +250,36 @@ def api_job_stream(job_id):
                 break
             time.sleep(0.5)
     return Response(generate(), mimetype="text/event-stream")
+
+
+@app.route("/api/queue")
+def api_queue():
+    items = []
+    for jid in job_queue:
+        j = jobs.get(jid, {})
+        items.append({
+            "job_id": jid,
+            "status": j.get("status"),
+            "progress": j.get("progress", 0),
+            "message": j.get("message", ""),
+            "filename": j.get("filename", ""),
+            "prompt_text": j.get("prompt_text", ""),
+            "output_video": j.get("output_video"),
+            "output_audio": j.get("output_audio"),
+        })
+    return jsonify(items)
+
+
+@app.route("/api/job/<job_id>/cancel", methods=["POST"])
+def api_cancel(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Not found"}), 404
+    if job["status"] == "queued":
+        job["status"] = "cancelled"
+        job["message"] = "Cancelled"
+        return jsonify({"ok": True})
+    return jsonify({"error": "Can only cancel queued jobs"}), 400
 
 
 @app.route("/output/<path:filename>")

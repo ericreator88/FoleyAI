@@ -377,58 +377,130 @@
     transition: width 0.5s ease;
   }
 
-  /* ── History ─────────────────────────── */
-  .history-panel {
+  /* ── Queue ────────────────────────────── */
+  .queue-panel {
     grid-column: 1 / -1;
   }
 
-  .history-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 12px;
+  .queue-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
   }
 
-  .history-item {
+  .queue-count {
+    font-size: 0.75rem;
+    color: var(--text2);
+    background: var(--surface2);
+    padding: 4px 10px;
+    border-radius: 12px;
+  }
+
+  .queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .queue-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
     background: var(--surface2);
     border-radius: 10px;
-    overflow: hidden;
-    cursor: pointer;
-    transition: all 0.2s;
+    padding: 12px 16px;
     border: 1px solid transparent;
+    transition: all 0.2s;
   }
 
-  .history-item:hover {
+  .queue-item.processing {
     border-color: var(--accent);
-    transform: translateY(-2px);
+    background: rgba(108, 92, 231, 0.08);
   }
 
-  .history-item video {
-    width: 100%;
-    height: 140px;
-    object-fit: cover;
-    background: #000;
+  .queue-item.done { opacity: 0.7; }
+  .queue-item.error { border-color: var(--red); }
+  .queue-item.cancelled { opacity: 0.4; }
+
+  .qi-num {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text2);
+    min-width: 24px;
+    text-align: center;
   }
 
-  .history-meta {
-    padding: 10px;
+  .qi-info {
+    flex: 1;
+    min-width: 0;
   }
 
-  .history-meta .name {
-    font-size: 0.8rem;
+  .qi-filename {
+    font-size: 0.85rem;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .history-meta .prompt {
-    font-size: 0.7rem;
+  .qi-prompt {
+    font-size: 0.75rem;
     color: var(--text2);
-    margin-top: 4px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    margin-top: 2px;
   }
+
+  .qi-status {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    min-width: 80px;
+    text-align: center;
+  }
+
+  .qi-status.s-queued { color: var(--text2); }
+  .qi-status.s-processing { color: var(--accent2); }
+  .qi-status.s-done { color: var(--green); }
+  .qi-status.s-error { color: var(--red); }
+  .qi-status.s-cancelled { color: var(--text2); }
+
+  .qi-progress {
+    width: 80px;
+    height: 4px;
+    background: var(--bg);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .qi-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 2px;
+    transition: width 0.4s;
+  }
+
+  .qi-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .qi-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text2);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .qi-btn:hover { border-color: var(--accent); color: var(--text); }
+  .qi-btn.cancel:hover { border-color: var(--red); color: var(--red); }
 
   /* ── Responsive ─────────────────────── */
   @media (max-width: 800px) {
@@ -542,7 +614,7 @@
     </div>
 
     <button class="generate-btn" id="generateBtn" onclick="generate()" disabled>
-      Generate Audio
+      Add to Queue
     </button>
   </div>
 
@@ -575,10 +647,13 @@
     </div>
   </div>
 
-  <!-- History -->
-  <div class="panel history-panel" id="historyPanel" style="display:none">
-    <div class="panel-title">Recent Generations</div>
-    <div class="history-grid" id="historyGrid"></div>
+  <!-- Queue -->
+  <div class="panel queue-panel" id="queuePanel" style="display:none">
+    <div class="queue-header">
+      <div class="panel-title" style="margin:0">Queue</div>
+      <div class="queue-count" id="queueCount">0 items</div>
+    </div>
+    <div class="queue-list" id="queueList"></div>
   </div>
 </main>
 
@@ -660,20 +735,13 @@ async function pollStatus() {
 setInterval(pollStatus, 1500);
 pollStatus();
 
-// ── Generate ──────────────────────────
+// ── Generate (adds to queue) ─────────
 async function generate() {
   if (!selectedFile || !modelReady) return;
 
   const btn = $('generateBtn');
   btn.disabled = true;
-  btn.textContent = 'Generating...';
-
-  // Show progress
-  $('progressWrap').classList.add('active');
-  $('outputEmpty').style.display = 'none';
-  $('outputVideo').style.display = 'none';
-  $('outputActions').style.display = 'none';
-  setProgress(0, 'Uploading...');
+  btn.textContent = 'Queuing...';
 
   const form = new FormData();
   form.append('video', selectedFile);
@@ -686,33 +754,96 @@ async function generate() {
     const r = await fetch('/api/generate', { method: 'POST', body: form });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-
-    // Poll job via SSE
-    const es = new EventSource('/api/job/' + d.job_id + '/stream');
-    es.onmessage = ev => {
-      const job = JSON.parse(ev.data);
-      setProgress(job.progress, job.message);
-
-      if (job.status === 'done') {
-        es.close();
-        showResult(job);
-        btn.disabled = false;
-        btn.textContent = 'Generate Audio';
-        $('progressWrap').classList.remove('active');
-      } else if (job.status === 'error') {
-        es.close();
-        setProgress(0, 'Error: ' + job.message);
-        btn.disabled = false;
-        btn.textContent = 'Generate Audio';
-      }
-    };
-    es.onerror = () => { es.close(); btn.disabled = false; btn.textContent = 'Generate Audio'; };
-
+    pollQueue(); // immediate refresh
   } catch (e) {
-    setProgress(0, 'Error: ' + e.message);
-    btn.disabled = false;
-    btn.textContent = 'Generate Audio';
+    alert('Error: ' + e.message);
   }
+
+  btn.disabled = false;
+  btn.textContent = 'Add to Queue';
+  updateGenerateBtn();
+}
+
+// ── Queue Polling ────────────────────
+let lastShownDone = null;
+
+async function pollQueue() {
+  try {
+    const r = await fetch('/api/queue');
+    const items = await r.json();
+    renderQueue(items);
+
+    // Show latest done item in output panel
+    const doneItems = items.filter(i => i.status === 'done' && i.output_video);
+    if (doneItems.length > 0) {
+      const latest = doneItems[doneItems.length - 1];
+      if (latest.job_id !== lastShownDone) {
+        lastShownDone = latest.job_id;
+        showResult(latest);
+      }
+    }
+
+    // Update main progress bar for active item
+    const active = items.find(i => i.status === 'processing');
+    if (active) {
+      $('progressWrap').classList.add('active');
+      $('outputEmpty').style.display = 'none';
+      setProgress(active.progress, active.message);
+    } else {
+      $('progressWrap').classList.remove('active');
+    }
+  } catch (e) { /* server not ready */ }
+}
+
+setInterval(pollQueue, 1000);
+
+function renderQueue(items) {
+  const panel = $('queuePanel');
+  if (items.length === 0) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+
+  const pending = items.filter(i => i.status === 'queued').length;
+  const processing = items.filter(i => i.status === 'processing').length;
+  const done = items.filter(i => i.status === 'done').length;
+  $('queueCount').textContent = `${pending} pending · ${processing} active · ${done} done`;
+
+  $('queueList').innerHTML = items.map((item, i) => {
+    const cls = item.status;
+    const pct = item.progress || 0;
+    const prompt = item.prompt_text || '(no prompt)';
+    const fname = item.filename || 'video';
+
+    let actions = '';
+    if (item.status === 'queued') {
+      actions = `<button class="qi-btn cancel" onclick="cancelJob('${item.job_id}')">Cancel</button>`;
+    } else if (item.status === 'done' && item.output_video) {
+      actions = `<a class="qi-btn" href="/output/${item.output_video}" download>DL</a>
+                 <button class="qi-btn" onclick="showResult(${JSON.stringify(item).replace(/"/g,'&quot;')})">View</button>`;
+    }
+
+    let progressBar = '';
+    if (item.status === 'processing') {
+      progressBar = `<div class="qi-progress"><div class="qi-progress-fill" style="width:${pct}%"></div></div>`;
+    }
+
+    return `
+      <div class="queue-item ${cls}">
+        <div class="qi-num">#${i + 1}</div>
+        <div class="qi-info">
+          <div class="qi-filename">${fname}</div>
+          <div class="qi-prompt">${prompt}</div>
+        </div>
+        ${progressBar}
+        <div class="qi-status s-${cls}">${item.status === 'processing' ? pct + '%' : item.status}</div>
+        <div class="qi-actions">${actions}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function cancelJob(jobId) {
+  await fetch('/api/job/' + jobId + '/cancel', { method: 'POST' });
+  pollQueue();
 }
 
 function setProgress(pct, msg) {
@@ -722,37 +853,19 @@ function setProgress(pct, msg) {
 }
 
 function showResult(job) {
+  if (!job.output_video) return;
   const videoUrl = '/output/' + job.output_video;
   const audioUrl = '/output/' + job.output_audio;
 
   $('resultVideo').src = videoUrl;
   $('outputVideo').style.display = 'block';
+  $('outputEmpty').style.display = 'none';
   $('outputActions').style.display = 'flex';
   $('dlVideo').href = videoUrl;
   $('dlVideo').download = job.output_video;
   $('dlAudio').href = audioUrl;
   $('dlAudio').download = job.output_audio;
-
-  // Add to history
-  history.unshift({ video: videoUrl, audio: audioUrl, name: job.output_video, prompt: $('prompt').value });
-  renderHistory();
-
-  // Auto-play
   $('resultVideo').play();
-}
-
-function renderHistory() {
-  if (history.length < 2) { $('historyPanel').style.display = 'none'; return; }
-  $('historyPanel').style.display = '';
-  $('historyGrid').innerHTML = history.slice(1, 9).map(h => `
-    <div class="history-item" onclick="window.open('${h.video}')">
-      <video src="${h.video}" muted preload="metadata"></video>
-      <div class="history-meta">
-        <div class="name">${h.name}</div>
-        <div class="prompt">${h.prompt || '(no prompt)'}</div>
-      </div>
-    </div>
-  `).join('');
 }
 
 function toggleModel() {
