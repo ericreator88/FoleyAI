@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Foley — AI Sound Design</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: #2a2a3a;
+    --text: #e4e4ef;
+    --text2: #8888a0;
+    --accent: #6c5ce7;
+    --accent2: #a29bfe;
+    --green: #00b894;
+    --red: #ff6b6b;
+    --orange: #fdcb6e;
+    --radius: 12px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ─────────────────────────── */
+  .header {
+    padding: 2rem 2rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+
+  .logo h1 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .logo h1 span { color: var(--accent2); }
+
+  .sys-info {
+    display: flex; gap: 16px; align-items: center;
+  }
+
+  .chip {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .chip-gpu {
+    background: rgba(108, 92, 231, 0.15);
+    color: var(--accent2);
+    border: 1px solid rgba(108, 92, 231, 0.3);
+  }
+
+  .chip-model {
+    border: 1px solid var(--border);
+    color: var(--text2);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .chip-model:hover { border-color: var(--accent); color: var(--text); }
+
+  .chip-status {
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text2);
+    transition: background 0.3s;
+  }
+
+  .status-dot.ready { background: var(--green); box-shadow: 0 0 8px rgba(0, 184, 148, 0.5); }
+  .status-dot.loading { background: var(--orange); animation: pulse 1s infinite; }
+  .status-dot.error { background: var(--red); }
+
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* ── Main Layout ────────────────────── */
+  .main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1.5rem 2rem 3rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+  }
+
+  .panel-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text2);
+    margin-bottom: 20px;
+  }
+
+  /* ── Drop Zone ──────────────────────── */
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+    overflow: hidden;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .dropzone:hover, .dropzone.drag-over {
+    border-color: var(--accent);
+    background: rgba(108, 92, 231, 0.05);
+  }
+
+  .dropzone.has-file {
+    border-style: solid;
+    border-color: var(--accent);
+    padding: 0;
+  }
+
+  .dropzone video {
+    width: 100%;
+    max-height: 300px;
+    border-radius: 10px;
+    object-fit: contain;
+    background: #000;
+  }
+
+  .drop-icon {
+    font-size: 2.5rem;
+    margin-bottom: 12px;
+    opacity: 0.5;
+  }
+
+  .drop-text { color: var(--text2); font-size: 0.9rem; }
+  .drop-text strong { color: var(--accent2); }
+
+  .drop-hint {
+    font-size: 0.75rem;
+    color: var(--text2);
+    opacity: 0.6;
+    margin-top: 8px;
+  }
+
+  .file-clear {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(0,0,0,0.7);
+    border: none;
+    color: white;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 14px;
+    z-index: 10;
+    display: none;
+  }
+
+  .dropzone.has-file .file-clear { display: block; }
+
+  /* ── Form ────────────────────────────── */
+  .form-group { margin-bottom: 16px; }
+
+  .form-group label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text2);
+    margin-bottom: 6px;
+  }
+
+  input[type="text"], textarea {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.9rem;
+    font-family: inherit;
+    resize: vertical;
+    transition: border-color 0.2s;
+  }
+
+  input[type="text"]:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  textarea { min-height: 72px; }
+
+  .params-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .param-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .param-input input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+
+  .param-val {
+    min-width: 32px;
+    text-align: right;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Generate Button ────────────────── */
+  .generate-btn {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    border: none;
+    border-radius: 10px;
+    color: white;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s;
+    letter-spacing: 0.02em;
+    margin-top: 8px;
+  }
+
+  .generate-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(108, 92, 231, 0.4);
+  }
+
+  .generate-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* ── Output Panel ───────────────────── */
+  .output-area {
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .output-empty {
+    text-align: center;
+    color: var(--text2);
+    opacity: 0.5;
+  }
+
+  .output-empty .icon { font-size: 3rem; margin-bottom: 12px; }
+
+  .output-video {
+    width: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #000;
+  }
+
+  .output-video video {
+    width: 100%;
+    max-height: 340px;
+    object-fit: contain;
+    background: #000;
+  }
+
+  .output-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+    width: 100%;
+  }
+
+  .dl-btn {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    text-decoration: none;
+    transition: all 0.2s;
+  }
+
+  .dl-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent2);
+  }
+
+  /* ── Progress Bar ───────────────────── */
+  .progress-wrap {
+    width: 100%;
+    margin-top: 24px;
+    display: none;
+  }
+
+  .progress-wrap.active { display: block; }
+
+  .progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    margin-bottom: 8px;
+  }
+
+  .progress-label .msg { color: var(--text2); }
+  .progress-label .pct { color: var(--accent2); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .progress-bar {
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 3px;
+    width: 0%;
+    transition: width 0.5s ease;
+  }
+
+  /* ── History ─────────────────────────── */
+  .history-panel {
+    grid-column: 1 / -1;
+  }
+
+  .history-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+  }
+
+  .history-item {
+    background: var(--surface2);
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+  }
+
+  .history-item:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+
+  .history-item video {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    background: #000;
+  }
+
+  .history-meta {
+    padding: 10px;
+  }
+
+  .history-meta .name {
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .history-meta .prompt {
+    font-size: 0.7rem;
+    color: var(--text2);
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── Responsive ─────────────────────── */
+  @media (max-width: 800px) {
+    .main { grid-template-columns: 1fr; }
+    .header { flex-direction: column; gap: 12px; }
+    .sys-info { flex-wrap: wrap; justify-content: center; }
+  }
+
+  /* ── Loading Overlay ────────────────── */
+  .model-loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 15, 0.92);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    transition: opacity 0.5s;
+  }
+
+  .model-loading-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .loader-ring {
+    width: 56px; height: 56px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent2);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loader-text { color: var(--text2); font-size: 0.95rem; }
+  .loader-sub { color: var(--text2); font-size: 0.8rem; opacity: 0.5; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<!-- Loading Overlay -->
+<div class="model-loading-overlay" id="loadingOverlay">
+  <div class="loader-ring"></div>
+  <div class="loader-text" id="loadingText">Loading models...</div>
+  <div class="loader-sub">This takes ~30s on first launch</div>
+</div>
+
+<!-- Header -->
+<header class="header">
+  <div class="logo">
+    <div class="logo-icon">F</div>
+    <h1>Foley<span>AI</span></h1>
+  </div>
+  <div class="sys-info">
+    <div class="chip chip-gpu" id="gpuChip">—</div>
+    <div class="chip chip-model" id="modelChip" onclick="toggleModel()">XXL</div>
+    <div class="chip chip-status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText" style="font-size:0.75rem;color:var(--text2)">Initializing</span>
+    </div>
+  </div>
+</header>
+
+<!-- Main -->
+<main class="main">
+  <!-- Input Panel -->
+  <div class="panel">
+    <div class="panel-title">Input</div>
+
+    <div class="dropzone" id="dropzone" onclick="fileInput.click()">
+      <button class="file-clear" id="fileClear" onclick="event.stopPropagation(); clearFile();">&times;</button>
+      <div id="dropContent">
+        <div class="drop-icon">&#9654;</div>
+        <div class="drop-text">Drop video here or <strong>browse</strong></div>
+        <div class="drop-hint">MP4, AVI, MOV — up to 500MB</div>
+      </div>
+      <video id="previewVideo" style="display:none" controls muted></video>
+    </div>
+    <input type="file" id="fileInput" accept="video/*" style="display:none">
+
+    <div class="form-group" style="margin-top:16px">
+      <label>Sound Description (optional)</label>
+      <textarea id="prompt" placeholder="tires screeching on asphalt, engine revving loudly"></textarea>
+    </div>
+
+    <div class="form-group">
+      <label>Negative Prompt (optional)</label>
+      <input type="text" id="negPrompt" placeholder="noisy, harsh, distorted">
+    </div>
+
+    <div class="params-row">
+      <div class="form-group">
+        <label>CFG Scale</label>
+        <div class="param-input">
+          <input type="range" id="cfgScale" min="1" max="10" step="0.1" value="4.5"
+                 oninput="document.getElementById('cfgVal').textContent=this.value">
+          <span class="param-val" id="cfgVal">4.5</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Steps</label>
+        <div class="param-input">
+          <input type="range" id="numSteps" min="10" max="100" step="5" value="50"
+                 oninput="document.getElementById('stepsVal').textContent=this.value">
+          <span class="param-val" id="stepsVal">50</span>
+        </div>
+      </div>
+    </div>
+
+    <button class="generate-btn" id="generateBtn" onclick="generate()" disabled>
+      Generate Audio
+    </button>
+  </div>
+
+  <!-- Output Panel -->
+  <div class="panel">
+    <div class="panel-title">Output</div>
+
+    <div class="output-area" id="outputArea">
+      <div class="output-empty" id="outputEmpty">
+        <div class="icon">&#127925;</div>
+        <div>Generated audio will appear here</div>
+      </div>
+      <div class="output-video" id="outputVideo" style="display:none">
+        <video id="resultVideo" controls></video>
+      </div>
+      <div class="output-actions" id="outputActions" style="display:none">
+        <a class="dl-btn" id="dlVideo" download>&#11015; Video + Audio</a>
+        <a class="dl-btn" id="dlAudio" download>&#11015; Audio Only</a>
+      </div>
+    </div>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-label">
+        <span class="msg" id="progressMsg">Starting...</span>
+        <span class="pct" id="progressPct">0%</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div class="panel history-panel" id="historyPanel" style="display:none">
+    <div class="panel-title">Recent Generations</div>
+    <div class="history-grid" id="historyGrid"></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let selectedFile = null;
+let history = [];
+
+// ── Dropzone ──────────────────────────
+const dz = $('dropzone');
+const fi = $('fileInput');
+
+['dragenter','dragover'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.add('drag-over'); }));
+['dragleave','drop'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.remove('drag-over'); }));
+
+dz.addEventListener('drop', ev => {
+  const file = ev.dataTransfer.files[0];
+  if (file && file.type.startsWith('video/')) handleFile(file);
+});
+
+fi.addEventListener('change', () => { if (fi.files[0]) handleFile(fi.files[0]); });
+
+function handleFile(file) {
+  selectedFile = file;
+  $('dropContent').style.display = 'none';
+  const vid = $('previewVideo');
+  vid.src = URL.createObjectURL(file);
+  vid.style.display = 'block';
+  dz.classList.add('has-file');
+  updateGenerateBtn();
+}
+
+function clearFile() {
+  selectedFile = null;
+  $('previewVideo').style.display = 'none';
+  $('previewVideo').src = '';
+  $('dropContent').style.display = '';
+  dz.classList.remove('has-file');
+  updateGenerateBtn();
+}
+
+function updateGenerateBtn() {
+  $('generateBtn').disabled = !selectedFile || !modelReady;
+}
+
+// ── Status Polling ────────────────────
+let modelReady = false;
+
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+
+    $('gpuChip').textContent = d.gpu || 'CPU';
+    $('modelChip').textContent = (d.model_size || 'xxl').toUpperCase();
+
+    const dot = $('statusDot');
+    const txt = $('statusText');
+
+    if (d.model_loaded) {
+      dot.className = 'status-dot ready';
+      txt.textContent = 'Ready';
+      modelReady = true;
+      $('loadingOverlay').classList.add('hidden');
+    } else if (d.model_loading) {
+      dot.className = 'status-dot loading';
+      txt.textContent = 'Loading...';
+      $('loadingText').textContent = 'Loading ' + (d.model_size || 'XXL').toUpperCase() + ' model...';
+    } else if (d.model_error) {
+      dot.className = 'status-dot error';
+      txt.textContent = 'Error';
+      $('loadingText').textContent = 'Error: ' + d.model_error;
+    }
+
+    updateGenerateBtn();
+  } catch (e) { /* server not ready yet */ }
+}
+
+setInterval(pollStatus, 1500);
+pollStatus();
+
+// ── Generate ──────────────────────────
+async function generate() {
+  if (!selectedFile || !modelReady) return;
+
+  const btn = $('generateBtn');
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+
+  // Show progress
+  $('progressWrap').classList.add('active');
+  $('outputEmpty').style.display = 'none';
+  $('outputVideo').style.display = 'none';
+  $('outputActions').style.display = 'none';
+  setProgress(0, 'Uploading...');
+
+  const form = new FormData();
+  form.append('video', selectedFile);
+  form.append('prompt', $('prompt').value);
+  form.append('neg_prompt', $('negPrompt').value);
+  form.append('guidance_scale', $('cfgScale').value);
+  form.append('num_steps', $('numSteps').value);
+
+  try {
+    const r = await fetch('/api/generate', { method: 'POST', body: form });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+
+    // Poll job via SSE
+    const es = new EventSource('/api/job/' + d.job_id + '/stream');
+    es.onmessage = ev => {
+      const job = JSON.parse(ev.data);
+      setProgress(job.progress, job.message);
+
+      if (job.status === 'done') {
+        es.close();
+        showResult(job);
+        btn.disabled = false;
+        btn.textContent = 'Generate Audio';
+        $('progressWrap').classList.remove('active');
+      } else if (job.status === 'error') {
+        es.close();
+        setProgress(0, 'Error: ' + job.message);
+        btn.disabled = false;
+        btn.textContent = 'Generate Audio';
+      }
+    };
+    es.onerror = () => { es.close(); btn.disabled = false; btn.textContent = 'Generate Audio'; };
+
+  } catch (e) {
+    setProgress(0, 'Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Generate Audio';
+  }
+}
+
+function setProgress(pct, msg) {
+  $('progressFill').style.width = pct + '%';
+  $('progressPct').textContent = pct + '%';
+  $('progressMsg').textContent = msg;
+}
+
+function showResult(job) {
+  const videoUrl = '/output/' + job.output_video;
+  const audioUrl = '/output/' + job.output_audio;
+
+  $('resultVideo').src = videoUrl;
+  $('outputVideo').style.display = 'block';
+  $('outputActions').style.display = 'flex';
+  $('dlVideo').href = videoUrl;
+  $('dlVideo').download = job.output_video;
+  $('dlAudio').href = audioUrl;
+  $('dlAudio').download = job.output_audio;
+
+  // Add to history
+  history.unshift({ video: videoUrl, audio: audioUrl, name: job.output_video, prompt: $('prompt').value });
+  renderHistory();
+
+  // Auto-play
+  $('resultVideo').play();
+}
+
+function renderHistory() {
+  if (history.length < 2) { $('historyPanel').style.display = 'none'; return; }
+  $('historyPanel').style.display = '';
+  $('historyGrid').innerHTML = history.slice(1, 9).map(h => `
+    <div class="history-item" onclick="window.open('${h.video}')">
+      <video src="${h.video}" muted preload="metadata"></video>
+      <div class="history-meta">
+        <div class="name">${h.name}</div>
+        <div class="prompt">${h.prompt || '(no prompt)'}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleModel() {
+  alert('To switch models, restart with:\n\nMODEL_SIZE=xl foley-app.bat\n\nor\n\nMODEL_SIZE=xxl foley-app.bat');
+}
+</script>
+</body>
+</html>
